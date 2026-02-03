@@ -13,7 +13,7 @@ RUN apt-get update && apt-get install -y \
 # 2. 安装 Node.js 20 和 PM2
 RUN mkdir -p /etc/apt/keyrings
 RUN curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg
-RUN echo “deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_20.x nodistro main” | tee /etc/apt/sources.list.d/nodesource.list
+RUN echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_20.x nodistro main" | tee /etc/apt/sources.list.d/nodesource.list
 RUN apt-get update && apt-get install -y nodejs
 RUN npm install -g pm2
 
@@ -57,4 +57,4 @@ COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 ENV PORT=8080
 EXPOSE 8080 3002
 
-CMD [“/usr/bin/supervisord”, “-c”, “/etc/supervisor/conf.d/supervisord.conf”]
+CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]
