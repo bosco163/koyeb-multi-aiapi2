@@ -1,0 +1,15 @@
+{
+  "name": "cloudflare-worker-proxy",
+  "version": "1.0.0",
+  "description": "Cloudflare Worker style proxy service with internal service support",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "node-fetch": "^3.3.2"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
