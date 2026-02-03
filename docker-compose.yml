@@ -8,53 +8,15 @@ services:
       - "8080:8080"
     environment:
       - PORT=8080
+      # Worker 环境变量
       - NODE_TLS_REJECT_UNAUTHORIZED=0
-      - PM2_PUBLIC_KEY=your_key_here
-      - PM2_SECRET_KEY=your_secret_here
     restart: always
-    # 关键：添加资源限制
-    deploy:
-      resources:
-        limits:
-          memory: 2G      # 限制总内存为2GB
-          cpus: '1.5'     # 限制CPU使用
-    # 另一种写法（兼容旧版本）
-    mem_limit: 2g
-    mem_reservation: 1g
-    cpus: 1.5
-    # 配置日志轮转
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "5"
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs
-      - ./pm2-logs:/root/.pm2/logs  # PM2日志持久化
-    # 健康检查
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/nginx_status"]
+      test: ["CMD", "curl", "-f", "http://localhost:8080/"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 60s
-    # 添加启动顺序和依赖
-    depends_on:
-      - redis
-    
-  # 添加 Redis 缓存服务（可选，缓解内存压力）
-  redis:
-    image: redis:7-alpine
-    container_name: multi-api-redis
-    ports:
-      - "6379:6379"
-    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
-    volumes:
-      - ./redis-data:/data
-    restart: always
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
+      start_period: 40s
