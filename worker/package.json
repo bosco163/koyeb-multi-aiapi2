@@ -4,12 +4,16 @@
   "description": "Cloudflare Worker style proxy service",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
   },
   "dependencies": {
     "node-fetch": "^3.3.2"
   },
   "engines": {
     "node": ">=18.0.0"
-  }
+  },
+  "keywords": ["proxy", "worker", "cloudflare", "api", "stream"],
+  "author": "",
+  "license": "MIT"
 }
