@@ -1,7 +1,7 @@
 {
   "name": "cloudflare-worker-proxy",
   "version": "1.0.0",
-  "description": "Cloudflare Worker style proxy service with internal service support",
+  "description": "Cloudflare Worker style proxy service",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
