@@ -8,8 +8,15 @@ services:
       - "8080:8080"
     environment:
       - PORT=8080
-      # 如果需要，可以在这里添加其他环境变量
+      # Worker 环境变量
+      - NODE_TLS_REJECT_UNAUTHORIZED=0
     restart: always
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
