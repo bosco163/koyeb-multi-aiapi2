@@ -7,16 +7,7 @@ const TERMINATOR = "FINISHED"; // 特殊终结符
 const WORKER_PORT = process.env.PORT || 3002; // Worker 服务端口
 // ===========================================
 
-// 内部服务映射表
-const INTERNAL_SERVICES = {
-    'deepseek': 'http://127.0.0.1:5001',
-    'qwen': 'http://127.0.0.1:3000',
-    'qw': 'http://127.0.0.1:8000',
-    'tts': 'http://127.0.0.1:5050',
-    'worker': 'http://127.0.0.1:3002'
-};
-
-// Node.js 的 fetch polyfill（Node.js 18+ 自带 fetch）
+// Node.js 的 fetch polyfill
 let fetch;
 if (globalThis.fetch) {
     fetch = globalThis.fetch;
@@ -26,48 +17,26 @@ if (globalThis.fetch) {
 
 const server = http.createServer(async (req, res) => {
     try {
-        // 1. 解析请求 URL
+        // 1. 解析目标 URL
         const url = new URL(req.url, `http://${req.headers.host}`);
         let targetPath = url.pathname.replace(/^\//, '');
         
-        // 如果路径为空，返回错误
         if (!targetPath) {
             res.writeHead(400, { 'Content-Type': 'text/plain' });
             res.end('Missing target URL');
             return;
         }
         
-        // 2. 检查是否是内部服务代理请求
-        // 格式: /service/deepseek/path 或 /service/qwen/path
-        const serviceMatch = targetPath.match(/^service\/([^\/]+)\/(.+)$/);
-        let targetUrl;
-        
-        if (serviceMatch) {
-            // 内部服务代理
-            const [, serviceName, servicePath] = serviceMatch;
-            if (INTERNAL_SERVICES[serviceName]) {
-                targetUrl = new URL(servicePath, INTERNAL_SERVICES[serviceName]);
-                targetUrl.search = url.search; // 保留查询参数
-            } else {
-                res.writeHead(404, { 'Content-Type': 'text/plain' });
-                res.end(`Service '${serviceName}' not found`);
-                return;
-            }
-        } else {
-            // 原始的外部代理逻辑
-            if (!targetPath.startsWith('http')) {
-                targetPath = 'https://' + targetPath;
-            }
-            targetUrl = new URL(targetPath + url.search);
-        }
-        
-        // 3. 构造请求头
+        if (!targetPath.startsWith("http")) targetPath = "https://" + targetPath;
+        const targetUrl = new URL(targetPath + url.search);
+
+        // 2. 构造请求头
         const headers = { ...req.headers };
         headers.host = targetUrl.host;
         delete headers['cf-ray'];
         delete headers['cf-connecting-ip'];
-        
-        // 4. 读取请求体（如果有）
+
+        // 3. 读取请求体
         let body = null;
         if (req.method !== 'GET' && req.method !== 'HEAD') {
             body = await new Promise((resolve) => {
@@ -76,16 +45,16 @@ const server = http.createServer(async (req, res) => {
                 req.on('end', () => resolve(Buffer.concat(chunks)));
             });
         }
-        
-        // 5. 发起请求
+
+        // 4. 发起请求
         const response = await fetch(targetUrl.toString(), {
             method: req.method,
             headers: headers,
             body: body,
             redirect: 'manual'
         });
-        
-        // 如果非 200 响应，直接透传
+
+        // 如果非 200 响应，直接透传错误
         if (response.status !== 200) {
             const headers = Object.fromEntries(response.headers.entries());
             res.writeHead(response.status, headers);
@@ -98,15 +67,15 @@ const server = http.createServer(async (req, res) => {
             res.end();
             return;
         }
-        
+
         const contentType = response.headers.get('content-type') || '';
         const isStream = contentType.includes('text/event-stream');
-        
-        // --- 6. 非流式处理 ---
+
+        // --- 4. 非流式处理 (只删除 content 最后的 FINISHED) ---
         if (!isStream) {
             let text = await response.text();
             
-            // 检查是否为空
+            // 检查原始文本是否为空
             if (!text || text.trim().length === 0) {
                 res.writeHead(503, { 'Content-Type': 'text/plain' });
                 res.end('Empty Response');
@@ -114,42 +83,63 @@ const server = http.createServer(async (req, res) => {
             }
             
             try {
-                // 尝试解析为 JSON（处理 OpenAI 格式）
                 const data = JSON.parse(text);
-                const content = data.choices?.[0]?.message?.content;
+                let content = data.choices?.[0]?.message?.content;
                 
                 if (content !== undefined && content !== null) {
-                    // 只删除结尾的 FINISHED
-                    const newContent = content.replace(new RegExp(`${TERMINATOR}$`), '');
-                    data.choices[0].message.content = newContent;
+                    // 【核心修改】只删除结尾的 FINISHED
+                    // $ 符号表示匹配字符串的末尾
+                    content = content.replace(new RegExp(TERMINATOR + '$'), '');
                     
-                    // 检查去掉后是否为空
-                    if (String(newContent).trim().length === 0) {
+                    // 更新回数据对象
+                    data.choices[0].message.content = content;
+                    
+                    // 检查去掉后是否实质内容为空
+                    if (String(content).trim().length === 0) {
                         res.writeHead(503, { 'Content-Type': 'text/plain' });
                         res.end('Empty Content After Filter');
                         return;
                     }
                     
+                    // 重新序列化为 JSON
                     text = JSON.stringify(data);
                 }
             } catch (e) {
-                // 如果不是 JSON，检查普通文本中的 TERMINATOR
-                const terminatorIndex = text.indexOf(TERMINATOR);
-                if (terminatorIndex !== -1) {
-                    text = text.substring(0, terminatorIndex);
-                }
+                // 如果解析失败，直接透传原始文本
             }
             
-            // 删除 content-length 头
-            const headers = { ...Object.fromEntries(response.headers.entries()) };
-            delete headers['content-length'];
+            // 【关键】必须删除 content-length，否则客户端会因为字节数对不上而卡住
+            const modifiedHeaders = { ...Object.fromEntries(response.headers.entries()) };
+            delete modifiedHeaders['content-length'];
             
-            res.writeHead(200, headers);
+            res.writeHead(200, modifiedHeaders);
             res.end(text);
             return;
         }
+
+        // --- 5. 流式处理 (核心逻辑 - 完全保留奇迹版，未动任何一行) ---
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        const encoder = new TextEncoder();
         
-        // --- 7. 流式处理 ---
+        // [步骤 A] 预检首包：拦截空回
+        const { value: firstChunk, done: firstDone } = await reader.read();
+        if (firstDone || !firstChunk) {
+            res.writeHead(503, { 'Content-Type': 'text/plain' });
+            res.end('Empty Stream');
+            return;
+        }
+        
+        const firstText = decoder.decode(firstChunk, { stream: true });
+        
+        // 如果首包就是 DONE 且没有任何 content，判定为空回
+        if (firstText.includes("data: [DONE]") && !firstText.includes('"content"')) {
+            res.writeHead(503, { 'Content-Type': 'text/plain' });
+            res.end('Stream Closed Immediately');
+            return;
+        }
+        
+        // [步骤 B] 构造输出流
         res.writeHead(200, {
             'Content-Type': 'text/event-stream',
             'Cache-Control': 'no-cache',
@@ -157,58 +147,72 @@ const server = http.createServer(async (req, res) => {
             'Transfer-Encoding': 'chunked'
         });
         
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-        
         let timer = null;
         
         // 强制结束函数
         const terminateStream = () => {
             if (timer) clearTimeout(timer);
             try {
-                res.write('data: [DONE]\n\n');
+                res.write(encoder.encode("\ndata: [DONE]\n\n"));
                 res.end();
             } catch (e) {}
         };
         
-        // 8秒计时器
+        // 8秒计时器：只有在流运行期间有效
         const resetTimer = () => {
             if (timer) clearTimeout(timer);
             timer = setTimeout(terminateStream, TIMEOUT_MS);
         };
         
-        resetTimer();
-        
-        try {
-            while (true) {
-                const { done, value } = await reader.read();
-                
-                if (done) {
-                    if (timer) clearTimeout(timer);
-                    res.write('data: [DONE]\n\n');
-                    res.end();
-                    break;
-                }
-                
-                let chunkText = decoder.decode(value, { stream: true });
-                
-                // 检查 FINISHED 终结符
-                if (chunkText.includes(TERMINATOR)) {
-                    // 擦除单词
-                    chunkText = chunkText.replace(new RegExp(TERMINATOR, 'g'), '');
-                    res.write(chunkText);
-                    terminateStream();
-                    break;
-                }
-                
-                res.write(chunkText);
-                resetTimer(); // 收到新数据，重置 8 秒
+        // 处理并发送数据块
+        const processAndEnqueue = (chunk) => {
+            let chunkText = decoder.decode(chunk, { stream: true });
+            
+            // 检查 FINISHED 终结符
+            if (chunkText.includes(TERMINATOR)) {
+                // 擦除单词
+                chunkText = chunkText.replace(new RegExp(TERMINATOR, 'g'), '');
+                res.write(encoder.encode(chunkText));
+                // 立即终结
+                terminateStream();
+                return true; 
             }
-        } catch (e) {
-            if (timer) clearTimeout(timer);
+            
+            res.write(encoder.encode(chunkText));
+            return false;
+        };
+        
+        // 发送首包并开始计时
+        const wasTerminated = processAndEnqueue(firstChunk);
+        if (!wasTerminated) {
+            resetTimer();
+            
+            // 循环读取
             try {
-                res.end();
-            } catch (e) {}
+                while (true) {
+                    const { done, value } = await reader.read();
+                    
+                    if (done) {
+                        if (timer) clearTimeout(timer);
+                        try {
+                            res.write(encoder.encode("\ndata: [DONE]\n\n"));
+                            res.end();
+                        } catch (e) {}
+                        break;
+                    }
+                    
+                    const shouldStop = processAndEnqueue(value);
+                    if (shouldStop) break;
+                    
+                    resetTimer(); // 收到新数据，重置 8 秒
+                }
+            } catch (e) {
+                if (timer) clearTimeout(timer);
+                try {
+                    res.write(encoder.encode("\ndata: [DONE]\n\n"));
+                    res.end();
+                } catch (e) {}
+            }
         }
         
     } catch (err) {
@@ -220,8 +224,7 @@ const server = http.createServer(async (req, res) => {
 
 // 启动服务器
 server.listen(WORKER_PORT, () => {
-    console.log(`Worker service listening on port ${WORKER_PORT}`);
-    console.log('Available internal services:', Object.keys(INTERNAL_SERVICES).join(', '));
+    console.log(`Worker proxy service listening on port ${WORKER_PORT}`);
 });
 
 // 优雅关闭
