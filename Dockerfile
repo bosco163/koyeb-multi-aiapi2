@@ -8,10 +8,10 @@ RUN apt-get update && apt-get install -y \
     curl \
     gnupg \
     build-essential \
-    procps \          # 添加 ps、top 等工具
-    htop \            # 交互式进程查看器
-    net-tools \       # 网络工具
-    dstat \           # 系统资源监控
+    procps \
+    htop \
+    net-tools \
+    dstat \
     && rm -rf /var/lib/apt/lists/*
 
 # 2. 安装 Node.js 20
