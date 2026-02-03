@@ -1,0 +1,15 @@
+version: '3.8'
+
+services:
+  multi-api-server:
+    build: .
+    container_name: multi-api-server
+    ports:
+      - "8080:8080"
+    environment:
+      - PORT=8080
+      # 如果需要，可以在这里添加其他环境变量
+    restart: always
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
