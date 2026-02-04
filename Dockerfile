@@ -1,6 +1,6 @@
 FROM python:3.10-slim
 
-# 1. 安装基础工具
+# 1. 安装最最基础的工具（移除cron, bc, procps等所有非必需项）
 RUN apt-get update && apt-get install -y \
     nginx \
     supervisor \
@@ -10,7 +10,7 @@ RUN apt-get update && apt-get install -y \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-# 2. 安装 Node.js 20 和 PM2
+# 2. 安装 Node.js 20 和 PM2 (PM2是关键，必须保留)
 RUN mkdir -p /etc/apt/keyrings
 RUN curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg
 RUN echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_20.x nodistro main" | tee /etc/apt/sources.list.d/nodesource.list
@@ -49,7 +49,7 @@ COPY ./worker/package*.json ./
 RUN npm install
 COPY ./worker/ ./
 
-# 8. 配置 Nginx 和 Supervisor
+# 8. 配置 Nginx 和 Supervisor (不再添加任何监控脚本)
 WORKDIR /app
 COPY nginx.conf /etc/nginx/sites-available/default
 COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
@@ -57,4 +57,5 @@ COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 ENV PORT=8080
 EXPOSE 8080 3002
 
+# 9. 启动命令回归最简（只启动supervisor）
 CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]
