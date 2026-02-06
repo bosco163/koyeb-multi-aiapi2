@@ -1,4 +1,3 @@
-[file content begin]
 FROM python:3.10-slim
 
 # 1. 安装 OpenResty（替代 nginx，支持 Lua）和基础工具
@@ -73,4 +72,3 @@ EXPOSE 8080 3002
 
 # 12. 启动命令
 CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]
-[file content end]
