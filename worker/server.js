@@ -23,6 +23,15 @@ if (process.env.NODE_TLS_REJECT_UNAUTHORIZED !== '1') {
 const server = http.createServer(async (req, res) => {
     console.log(`[Worker] ${req.method} ${req.url}`);
     
+    // 内存保护：如果内存使用过高，返回 503
+    const usedMemory = process.memoryUsage().heapUsed / 1024 / 1024;
+    if (usedMemory > 180) { // 接近 200M 重启阈值
+        console.warn(`[Worker] High memory usage: ${usedMemory.toFixed(2)}MB`);
+        res.writeHead(503, { 'Content-Type': 'text/plain' });
+        res.end('Service Temporarily Unavailable');
+        return;
+    }
+    
     try {
         // 1. 解析目标 URL
         const url = new URL(req.url, `http://${req.headers.host}`);
@@ -87,7 +96,8 @@ const server = http.createServer(async (req, res) => {
                 method: req.method,
                 headers: headers,
                 body: body,
-                redirect: 'manual'
+                redirect: 'manual',
+                timeout: 30000 // 增加超时时间
             });
         } catch (fetchError) {
             console.error(`[Worker] Fetch error: ${fetchError.message}`);
@@ -140,7 +150,7 @@ const server = http.createServer(async (req, res) => {
         
         console.log(`[Worker] Content-Type: ${contentType}, IsStream: ${isStream}`);
 
-        // --- 非流式处理 (只删除 content 最后的 FINISHED) ---
+        // --- 非流式处理 ---
         if (!isStream) {
             let text = await response.text();
             
@@ -164,8 +174,7 @@ const server = http.createServer(async (req, res) => {
                 console.log(`[Worker] Parsed JSON, content exists: ${content !== undefined && content !== null}`);
                 
                 if (content !== undefined && content !== null) {
-                    // 【核心修改】只删除结尾的 FINISHED
-                    // $ 符号表示匹配字符串的末尾
+                    // 只删除结尾的 FINISHED
                     const originalContent = content;
                     content = content.replace(new RegExp(TERMINATOR + '$'), '');
                     
@@ -194,7 +203,7 @@ const server = http.createServer(async (req, res) => {
                 }
             }
             
-            // 【关键】必须删除 content-length，否则客户端会因为字节数对不上而卡住
+            // 删除 content-length
             const modifiedHeaders = { ...responseHeaders };
             delete modifiedHeaders['content-length'];
             
@@ -205,13 +214,13 @@ const server = http.createServer(async (req, res) => {
             return;
         }
 
-        // --- 流式处理 (核心逻辑) ---
+        // --- 流式处理 ---
         console.log(`[Worker] Processing stream response`);
         
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
         
-        // [步骤 A] 预检首包：拦截空回
+        // 预检首包：拦截空回
         const { value: firstChunk, done: firstDone } = await reader.read();
         if (firstDone || !firstChunk) {
             console.log(`[Worker] Empty stream`);
@@ -231,7 +240,7 @@ const server = http.createServer(async (req, res) => {
             return;
         }
         
-        // [步骤 B] 构造输出流
+        // 构造输出流
         const streamHeaders = {
             'Content-Type': 'text/event-stream',
             'Cache-Control': 'no-cache',
@@ -339,6 +348,7 @@ const server = http.createServer(async (req, res) => {
 server.listen(WORKER_PORT, () => {
     console.log(`========================================`);
     console.log(`Worker proxy service listening on port ${WORKER_PORT}`);
+    console.log(`Memory limit: ~200MB (PM2 auto-restart)`);
     console.log(`Available endpoints:`);
     console.log(`  /worker/https://api.openai.com/v1/...`);
     console.log(`  /worker/http://127.0.0.1:5001/v1/... (代理内部DeepSeek)`);
@@ -355,3 +365,9 @@ process.on('SIGTERM', () => {
         process.exit(0);
     });
 });
+
+// 内存监控
+setInterval(() => {
+    const usedMemory = process.memoryUsage().heapUsed / 1024 / 1024;
+    console.log(`[Worker] Memory usage: ${usedMemory.toFixed(2)}MB`);
+}, 60000); // 每分钟记录一次内存使用情况
